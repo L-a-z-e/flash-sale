@@ -1,0 +1,85 @@
+server:
+  tomcat:
+    max-connections: 10000
+    accept-count: 1000
+    threads:
+      max: 200
+
+spring:
+  application:
+    name: flash-sale
+
+  threads:
+    virtual:
+      enabled: true
+
+  # PostgreSQL
+  datasource:
+    url: jdbc:postgresql://localhost:5433/flashsale
+    username: flashsale
+    password: flashsale
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    properties:
+      hibernate:
+        format_sql: true
+        default_batch_fetch_size: 100
+    open-in-view: false
+
+  # Redis Sentinel
+  data:
+    redis:
+      sentinel:
+        master: mymaster
+        nodes:
+          - localhost:26389
+          - localhost:26390
+          - localhost:26391
+
+  # Kafka
+  kafka:
+    bootstrap-servers: localhost:9092
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+    consumer:
+      group-id: flash-sale
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      enable-auto-commit: false
+    listener:
+      ack-mode: manual
+
+# Resilience4j Circuit Breaker
+resilience4j:
+  circuitbreaker:
+    instances:
+      redis:
+        sliding-window-size: 100
+        failure-rate-threshold: 60
+        wait-duration-in-open-state: 30s
+        permitted-number-of-calls-in-half-open-state: 5
+
+# Actuator + Prometheus
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, prometheus, metrics
+  metrics:
+    tags:
+      application: ${spring.application.name}
+
+# Mock PG
+payment:
+  mock-pg:
+    base-url: http://localhost:8090
+
+logging:
+  level:
+    org.hibernate.SQL: debug
+    com.flashsale: debug

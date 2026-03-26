@@ -1,0 +1,18 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://postgresql:5432/flashsale
+
+  data:
+    redis:
+      sentinel:
+        nodes:
+          - redis-sentinel1:26379
+          - redis-sentinel2:26379
+          - redis-sentinel3:26379
+
+  kafka:
+    bootstrap-servers: kafka:9092
+
+payment:
+  mock-pg:
+    base-url: http://mock-pg:8090
