@@ -1,0 +1,23 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://postgresql.flash-sale.svc.cluster.local:5432/flashsale
+
+  data:
+    redis:
+      sentinel:
+        master: mymaster
+        nodes:
+          - redis-sentinel.flash-sale.svc.cluster.local:26379
+
+  kafka:
+    bootstrap-servers: kafka.flash-sale.svc.cluster.local:9092
+
+payment:
+  mock-pg:
+    base-url: http://mock-pg.flash-sale.svc.cluster.local:8090
+
+server:
+  shutdown: graceful
+
+spring.lifecycle:
+  timeout-per-shutdown-phase: 30s

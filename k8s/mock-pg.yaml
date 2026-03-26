@@ -1,0 +1,39 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: mock-pg
+  namespace: flash-sale
+spec:
+  selector:
+    app: mock-pg
+  ports:
+    - port: 8090
+      targetPort: 8090
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mock-pg
+  namespace: flash-sale
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mock-pg
+  template:
+    metadata:
+      labels:
+        app: mock-pg
+    spec:
+      containers:
+        - name: mock-pg
+          image: flash-sale-mock-pg:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8090
+          readinessProbe:
+            httpGet:
+              path: /mock/config
+              port: 8090
+            initialDelaySeconds: 10
+            periodSeconds: 5
