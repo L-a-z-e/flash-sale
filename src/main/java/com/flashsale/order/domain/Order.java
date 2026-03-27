@@ -64,4 +64,11 @@ public class Order extends BaseTimeEntity {
         }
         this.status = OrderStatus.CANCELLED;
     }
+
+    public void refund() {
+        if (this.status != OrderStatus.CONFIRMED) {
+            throw new IllegalStateException("확정 상태에서만 환불 가능: 현재 " + this.status);
+        }
+        this.status = OrderStatus.REFUNDED;
+    }
 }

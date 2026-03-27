@@ -33,6 +33,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.*;
+import static org.mockito.Mockito.lenient;
 
 @ExtendWith(MockitoExtension.class)
 class PurchaseServiceTest {
@@ -55,9 +56,19 @@ class PurchaseServiceTest {
     @Mock
     private TimeDealRepository timeDealRepository;
 
+    @Mock
+    private com.flashsale.outbox.repository.OutboxEventRepository outboxEventRepository;
+
+    @Mock
+    private com.flashsale.reconciler.repository.CompensationFailureRepository compensationFailureRepository;
+
+    @Mock
+    private com.fasterxml.jackson.databind.ObjectMapper objectMapper;
+
     private PurchaseRequest request;
     private TimeDeal timeDeal;
     private final Long userId = 42L;
+    private final String queueToken = "valid-token";
 
     @BeforeEach
     void setUp() {
@@ -75,6 +86,10 @@ class PurchaseServiceTest {
                 .build();
     }
 
+    private void stubQueueTokenValid() {
+        given(valueOperations.get("token:" + userId + ":1")).willReturn(queueToken);
+    }
+
     @Nested
     @DisplayName("정상 흐름")
     class HappyPath {
@@ -83,6 +98,7 @@ class PurchaseServiceTest {
         @DisplayName("정상 구매 → PENDING 주문 생성")
         void purchaseSuccess() {
             given(redisTemplate.opsForValue()).willReturn(valueOperations);
+            stubQueueTokenValid();
             given(valueOperations.setIfAbsent(anyString(), anyString(), any(Duration.class)))
                     .willReturn(true);
             given(timeDealRepository.findById(1L)).willReturn(Optional.of(timeDeal));
@@ -93,7 +109,7 @@ class PurchaseServiceTest {
                 return order;
             });
 
-            PurchaseResponse response = purchaseService.purchase(userId, request);
+            PurchaseResponse response = purchaseService.purchase(userId, "valid-token", request);
 
             assertThat(response.getOrderId()).isEqualTo(1L);
             assertThat(response.getStatus()).isEqualTo(OrderStatus.PENDING);
@@ -111,6 +127,7 @@ class PurchaseServiceTest {
         @DisplayName("중복 키 + DB 주문 있음 → 기존 주문 반환")
         void duplicateKeyWithExistingOrder() {
             given(redisTemplate.opsForValue()).willReturn(valueOperations);
+            stubQueueTokenValid();
             given(valueOperations.setIfAbsent(anyString(), anyString(), any(Duration.class)))
                     .willReturn(false);
 
@@ -126,7 +143,7 @@ class PurchaseServiceTest {
             given(orderRepository.findByIdempotencyKey("test-uuid-123"))
                     .willReturn(Optional.of(existingOrder));
 
-            PurchaseResponse response = purchaseService.purchase(userId, request);
+            PurchaseResponse response = purchaseService.purchase(userId, "valid-token", request);
 
             assertThat(response.getOrderId()).isEqualTo(99L);
             assertThat(response.getMessage()).contains("이미");
@@ -137,6 +154,7 @@ class PurchaseServiceTest {
         @DisplayName("중복 키 + DB 주문 없음 → 키 삭제 후 새 주문 진행")
         void duplicateKeyWithNoOrder() {
             given(redisTemplate.opsForValue()).willReturn(valueOperations);
+            stubQueueTokenValid();
             given(valueOperations.setIfAbsent(anyString(), anyString(), any(Duration.class)))
                     .willReturn(false);
             given(orderRepository.findByIdempotencyKey("test-uuid-123"))
@@ -151,7 +169,7 @@ class PurchaseServiceTest {
                 return order;
             });
 
-            PurchaseResponse response = purchaseService.purchase(userId, request);
+            PurchaseResponse response = purchaseService.purchase(userId, "valid-token", request);
 
             assertThat(response.getOrderId()).isEqualTo(1L);
             verify(redisTemplate).delete("idempotency:test-uuid-123");
@@ -171,7 +189,7 @@ class PurchaseServiceTest {
                 return order;
             });
 
-            PurchaseResponse response = purchaseService.purchase(userId, request);
+            PurchaseResponse response = purchaseService.purchase(userId, "valid-token", request);
 
             assertThat(response.getOrderId()).isEqualTo(1L);
             verify(stockService).deductStock(1L, 1);
@@ -186,11 +204,12 @@ class PurchaseServiceTest {
         @DisplayName("TimeDeal 없음 → TIME_DEAL_NOT_FOUND")
         void timeDealNotFound() {
             given(redisTemplate.opsForValue()).willReturn(valueOperations);
+            stubQueueTokenValid();
             given(valueOperations.setIfAbsent(anyString(), anyString(), any(Duration.class)))
                     .willReturn(true);
             given(timeDealRepository.findById(1L)).willReturn(Optional.empty());
 
-            assertThatThrownBy(() -> purchaseService.purchase(userId, request))
+            assertThatThrownBy(() -> purchaseService.purchase(userId, "valid-token", request))
                     .isInstanceOf(BusinessException.class)
                     .satisfies(e -> {
                         BusinessException be = (BusinessException) e;
@@ -204,13 +223,14 @@ class PurchaseServiceTest {
         @DisplayName("재고 부족 → STOCK_INSUFFICIENT (보상 없음)")
         void stockInsufficient() {
             given(redisTemplate.opsForValue()).willReturn(valueOperations);
+            stubQueueTokenValid();
             given(valueOperations.setIfAbsent(anyString(), anyString(), any(Duration.class)))
                     .willReturn(true);
             given(timeDealRepository.findById(1L)).willReturn(Optional.of(timeDeal));
             given(stockService.deductStock(1L, 1))
                     .willThrow(new BusinessException(ErrorCode.STOCK_INSUFFICIENT));
 
-            assertThatThrownBy(() -> purchaseService.purchase(userId, request))
+            assertThatThrownBy(() -> purchaseService.purchase(userId, "valid-token", request))
                     .isInstanceOf(BusinessException.class)
                     .satisfies(e -> {
                         BusinessException be = (BusinessException) e;
@@ -225,6 +245,7 @@ class PurchaseServiceTest {
         @DisplayName("주문 생성 실패 → restoreStock 호출")
         void orderSaveFailure_restoresStock() {
             given(redisTemplate.opsForValue()).willReturn(valueOperations);
+            stubQueueTokenValid();
             given(valueOperations.setIfAbsent(anyString(), anyString(), any(Duration.class)))
                     .willReturn(true);
             given(timeDealRepository.findById(1L)).willReturn(Optional.of(timeDeal));
@@ -232,7 +253,7 @@ class PurchaseServiceTest {
             given(orderRepository.save(any(Order.class)))
                     .willThrow(new RuntimeException("DB connection lost"));
 
-            assertThatThrownBy(() -> purchaseService.purchase(userId, request))
+            assertThatThrownBy(() -> purchaseService.purchase(userId, "valid-token", request))
                     .isInstanceOf(RuntimeException.class);
 
             verify(stockService).restoreStock(1L, 1);
